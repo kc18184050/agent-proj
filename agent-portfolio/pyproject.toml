@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "analyst-portfolio"
+version = "1.0.0"
+description = "Point-in-time multi-agent analyst recommendations feeding Markowitz portfolios"
+requires-python = ">=3.12,<3.14"
+dependencies = ["pandas>=2.2,<4", "pyarrow>=18", "numpy>=2", "scipy>=1.14", "scikit-learn>=1.6", "openai>=2", "python-dotenv>=1", "matplotlib>=3.9", "markdown>=3.5"]
+
+[project.optional-dependencies]
+langflow = ["langflow==1.12.0"]
+test = ["pytest>=8"]
+
+[project.scripts]
+analyst-portfolio = "analyst_portfolio.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["analyst_portfolio*"]

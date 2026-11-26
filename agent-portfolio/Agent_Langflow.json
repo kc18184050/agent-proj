@@ -1,0 +1,1715 @@
+{
+  "id": "c7086613-e8e2-520d-9abe-657e18a94a6c",
+  "name": "Analyst Recommendations → Portfolio",
+  "description": "Open-only frozen calibration. Three GPT-5.6 Luna specialists → independent manager → IBES explanation and adjustment → Markowitz portfolio. Post-2026-02-16 testing.",
+  "data": {
+    "nodes": [
+      {
+        "id": "ChatInput-request",
+        "type": "genericNode",
+        "position": {
+          "x": 0,
+          "y": 400
+        },
+        "data": {
+          "id": "ChatInput-request",
+          "type": "ChatInput",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "files": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "file_path": "",
+                "fileTypes": [
+                  "csv",
+                  "json",
+                  "pdf",
+                  "txt",
+                  "md",
+                  "mdx",
+                  "yaml",
+                  "yml",
+                  "xml",
+                  "html",
+                  "htm",
+                  "docx",
+                  "py",
+                  "sh",
+                  "sql",
+                  "js",
+                  "ts",
+                  "tsx",
+                  "jpg",
+                  "jpeg",
+                  "png",
+                  "bmp",
+                  "image"
+                ],
+                "temp_file": true,
+                "list": true,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "files",
+                "value": "",
+                "display_name": "Files",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "Files to be sent with the message.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "file",
+                "_input_type": "FileInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from lfx.base.data.utils import IMG_FILE_TYPES, TEXT_FILE_TYPES\nfrom lfx.base.io.chat import ChatComponent\nfrom lfx.inputs.inputs import BoolInput\nfrom lfx.io import (\n    DropdownInput,\n    FileInput,\n    MessageTextInput,\n    MultilineInput,\n    Output,\n)\nfrom lfx.schema.image import get_file_paths\nfrom lfx.schema.message import Message\nfrom lfx.services.deps import get_settings_service\nfrom lfx.utils.constants import (\n    MESSAGE_SENDER_AI,\n    MESSAGE_SENDER_NAME_USER,\n    MESSAGE_SENDER_USER,\n)\nfrom lfx.utils.file_path_security import (\n    component_file_access_scopes,\n    enforce_local_file_access,\n    is_local_file_access_restricted,\n)\n\n\nclass ChatInput(ChatComponent):\n    display_name = \"Chat Input\"\n    description = \"Get chat inputs from the Playground.\"\n    documentation: str = \"https://docs.langflow.org/chat-input-and-output\"\n    icon = \"MessagesSquare\"\n    name = \"ChatInput\"\n    minimized = True\n\n    inputs = [\n        MultilineInput(\n            name=\"input_value\",\n            display_name=\"Input Text\",\n            value=\"\",\n            info=\"Message to be passed as input.\",\n            input_types=[],\n        ),\n        BoolInput(\n            name=\"should_store_message\",\n            display_name=\"Store Messages\",\n            info=\"Store the message in the history.\",\n            value=True,\n            advanced=True,\n        ),\n        DropdownInput(\n            name=\"sender\",\n            display_name=\"Sender Type\",\n            options=[MESSAGE_SENDER_AI, MESSAGE_SENDER_USER],\n            value=MESSAGE_SENDER_USER,\n            info=\"Type of sender.\",\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"sender_name\",\n            display_name=\"Sender Name\",\n            info=\"Name of the sender.\",\n            value=MESSAGE_SENDER_NAME_USER,\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"session_id\",\n            display_name=\"Session ID\",\n            info=\"The session ID of the chat. If empty, the current session ID parameter will be used.\",\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"context_id\",\n            display_name=\"Context ID\",\n            info=\"The context ID of the chat. Adds an extra layer to the local memory.\",\n            value=\"\",\n            advanced=True,\n        ),\n        FileInput(\n            name=\"files\",\n            display_name=\"Files\",\n            file_types=TEXT_FILE_TYPES + IMG_FILE_TYPES,\n            info=\"Files to be sent with the message.\",\n            advanced=True,\n            is_list=True,\n            temp_file=True,\n        ),\n    ]\n    outputs = [\n        Output(display_name=\"Chat Message\", name=\"message\", method=\"message_response\"),\n    ]\n\n    async def message_response(self) -> Message:\n        # Ensure files is a list and filter out empty/None values\n        files = self.files if self.files else []\n        if files and not isinstance(files, list):\n            files = [files]\n        # Filter out None/empty values\n        files = [f for f in files if f is not None and f != \"\"]\n\n        # Build endpoints inject caller-controlled file references directly into\n        # ChatInput. Resolve and validate local references before the Message can\n        # later read them while constructing model attachment content.\n        if files:\n            settings_service = get_settings_service()\n            storage_type = getattr(getattr(settings_service, \"settings\", None), \"storage_type\", \"local\")\n            # The storage factory falls back to local storage for unsupported\n            # values, so only the explicitly configured S3 backend may bypass\n            # filesystem containment.\n            if str(storage_type).lower() != \"s3\" and is_local_file_access_restricted():\n                scope_ids = list(component_file_access_scopes(self))\n                # Public executions replace graph.flow_id with a per-visitor\n                # virtual ID. Only the server-populated source provenance may\n                # restore the already-validated public attachment namespace.\n                source_flow_id = getattr(self.graph, \"source_flow_id\", None)\n                if source_flow_id:\n                    scope_ids.append(source_flow_id)\n                for file_path in get_file_paths(files):\n                    enforce_local_file_access(file_path, scope_ids=scope_ids)\n\n        session_id = self.session_id or self.graph.session_id or \"\"\n        message = await Message.create(\n            text=self.input_value,\n            sender=self.sender,\n            sender_name=self.sender_name,\n            session_id=session_id,\n            context_id=self.context_id,\n            files=files,\n        )\n        if session_id and isinstance(message, Message) and self.should_store_message:\n            stored_message = await self.send_message(\n                message,\n            )\n            self.message.value = stored_message\n            message = stored_message\n\n        self.status = message\n        return message\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "context_id": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "context_id",
+                "value": "",
+                "display_name": "Context ID",
+                "advanced": true,
+                "api_editable": false,
+                "input_types": [
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "The context ID of the chat. Adds an extra layer to the local memory.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "MessageTextInput"
+              },
+              "input_value": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "multiline": true,
+                "ai_enabled": false,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "input_value",
+                "value": "{\"date\":\"2026-03-02\",\"role\":\"core\",\"explain\":false}",
+                "display_name": "Input Text",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [],
+                "dynamic": false,
+                "info": "Message to be passed as input.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "copy_field": false,
+                "password": false,
+                "type": "str",
+                "_input_type": "MultilineInput"
+              },
+              "sender": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "options": [
+                  "Machine",
+                  "User"
+                ],
+                "options_metadata": [],
+                "combobox": false,
+                "dialog_inputs": {},
+                "toggle": false,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "sender",
+                "value": "User",
+                "display_name": "Sender Type",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "Type of sender.",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "external_options": {},
+                "type": "str",
+                "_input_type": "DropdownInput"
+              },
+              "sender_name": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "sender_name",
+                "value": "User",
+                "display_name": "Sender Name",
+                "advanced": true,
+                "api_editable": false,
+                "input_types": [
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "Name of the sender.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "MessageTextInput"
+              },
+              "session_id": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "session_id",
+                "value": "",
+                "display_name": "Session ID",
+                "advanced": true,
+                "api_editable": false,
+                "input_types": [
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "The session ID of the chat. If empty, the current session ID parameter will be used.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "MessageTextInput"
+              },
+              "should_store_message": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "should_store_message",
+                "value": false,
+                "display_name": "Store Messages",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "Store the message in the history.",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "_input_type": "BoolInput"
+              }
+            },
+            "description": "Get chat inputs from the Playground.",
+            "icon": "MessagesSquare",
+            "base_classes": [
+              "Message"
+            ],
+            "display_name": "Chat Input",
+            "documentation": "https://docs.langflow.org/chat-input-and-output",
+            "minimized": true,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "Message"
+                ],
+                "selected": "Message",
+                "name": "message",
+                "display_name": "Chat Message",
+                "method": "message_response",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "Chat Input"
+        }
+      },
+      {
+        "id": "PointInTimePack-packs",
+        "type": "genericNode",
+        "position": {
+          "x": 360,
+          "y": 400
+        },
+        "data": {
+          "id": "PointInTimePack-packs",
+          "type": "PointInTimePack",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "import json\nimport sys\nfrom lfx.custom.custom_component.component import Component\nfrom lfx.io import MessageTextInput, StrInput, Output\nfrom lfx.schema.data import Data\n\nclass PointInTimePack(Component):\n    display_name = 'Point-in-Time Evidence'\n    description = 'Read dated evidence only. Requires open-only frozen calibration. JSON request: date, role, explain.'\n    icon = 'CalendarCheck'\n    name = 'PointInTimePack'\n    inputs = [MessageTextInput(name='request',display_name='Request JSON',required=True,\n                value='{\"date\":\"2026-03-02\",\"role\":\"core\",\"explain\":false}'),\n              StrInput(name='project_root',display_name='Project directory',required=True)]\n    outputs = [Output(name='payload',display_name='Evidence packs',method='build_payload')]\n\n    def build_payload(self) -> Data:\n        if self.project_root not in sys.path:sys.path.insert(0,self.project_root)\n        from analyst_portfolio.pipeline import prepare\n        req=json.loads(self.request)\n        return Data(data=prepare(self.project_root,req['date'],req.get('role','core'),req.get('explain',False),req.get('ticker'),req.get('rating')))\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "project_root": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "project_root",
+                "value": ".",
+                "display_name": "Project directory",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "StrInput"
+              },
+              "request": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "request",
+                "value": "{\"date\":\"2026-03-02\",\"role\":\"core\",\"explain\":false}",
+                "display_name": "Request JSON",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "MessageTextInput"
+              }
+            },
+            "description": "Read dated evidence only. Requires open-only frozen calibration. JSON request: date, role, explain.",
+            "icon": "CalendarCheck",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "Point-in-Time Evidence",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "payload",
+                "display_name": "Evidence packs",
+                "method": "build_payload",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "Point-in-Time Evidence"
+        }
+      },
+      {
+        "id": "AnalystSpecialist-fundamental",
+        "type": "genericNode",
+        "position": {
+          "x": 760,
+          "y": 0
+        },
+        "data": {
+          "id": "AnalystSpecialist-fundamental",
+          "type": "AnalystSpecialist",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "payload": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "payload",
+                "value": "",
+                "display_name": "Evidence packs",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from lfx.custom.custom_component.component import Component\nfrom lfx.io import HandleInput, DropdownInput, Output\nfrom lfx.schema.data import Data\nimport sys\n\nclass AnalystSpecialist(Component):\n    display_name = 'GPT-5.6 Luna Specialist'\n    description = 'One distinct specialist role; blind to analyst-derived inputs. Responses API with validated evidence citations.'\n    icon = 'Brain'\n    name = 'AnalystSpecialist'\n    inputs = [HandleInput(name='payload',display_name='Evidence packs',input_types=['Data'],required=True),\n              DropdownInput(name='role',display_name='Specialist role',options=['fundamental','technical','news'],value='fundamental')]\n    outputs = [Output(name='report',display_name='Specialist report',method='analyze')]\n\n    def analyze(self) -> Data:\n        data=self.payload.data\n        if data['root'] not in sys.path:sys.path.insert(0,data['root'])\n        from analyst_portfolio.pipeline import specialist_stage\n        return Data(data=specialist_stage(data,self.role))\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "role": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "options": [
+                  "fundamental",
+                  "technical",
+                  "news"
+                ],
+                "options_metadata": [],
+                "combobox": false,
+                "dialog_inputs": {},
+                "toggle": false,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "role",
+                "value": "fundamental",
+                "display_name": "Specialist role",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "external_options": {},
+                "type": "str",
+                "_input_type": "DropdownInput"
+              }
+            },
+            "description": "One distinct specialist role; blind to analyst-derived inputs. Responses API with validated evidence citations.",
+            "icon": "Brain",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "GPT-5.6 Luna Specialist",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "report",
+                "display_name": "Specialist report",
+                "method": "analyze",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "GPT-5.6 Luna Specialist"
+        }
+      },
+      {
+        "id": "AnalystSpecialist-technical",
+        "type": "genericNode",
+        "position": {
+          "x": 760,
+          "y": 420
+        },
+        "data": {
+          "id": "AnalystSpecialist-technical",
+          "type": "AnalystSpecialist",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "payload": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "payload",
+                "value": "",
+                "display_name": "Evidence packs",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from lfx.custom.custom_component.component import Component\nfrom lfx.io import HandleInput, DropdownInput, Output\nfrom lfx.schema.data import Data\nimport sys\n\nclass AnalystSpecialist(Component):\n    display_name = 'GPT-5.6 Luna Specialist'\n    description = 'One distinct specialist role; blind to analyst-derived inputs. Responses API with validated evidence citations.'\n    icon = 'Brain'\n    name = 'AnalystSpecialist'\n    inputs = [HandleInput(name='payload',display_name='Evidence packs',input_types=['Data'],required=True),\n              DropdownInput(name='role',display_name='Specialist role',options=['fundamental','technical','news'],value='fundamental')]\n    outputs = [Output(name='report',display_name='Specialist report',method='analyze')]\n\n    def analyze(self) -> Data:\n        data=self.payload.data\n        if data['root'] not in sys.path:sys.path.insert(0,data['root'])\n        from analyst_portfolio.pipeline import specialist_stage\n        return Data(data=specialist_stage(data,self.role))\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "role": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "options": [
+                  "fundamental",
+                  "technical",
+                  "news"
+                ],
+                "options_metadata": [],
+                "combobox": false,
+                "dialog_inputs": {},
+                "toggle": false,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "role",
+                "value": "technical",
+                "display_name": "Specialist role",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "external_options": {},
+                "type": "str",
+                "_input_type": "DropdownInput"
+              }
+            },
+            "description": "One distinct specialist role; blind to analyst-derived inputs. Responses API with validated evidence citations.",
+            "icon": "Brain",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "GPT-5.6 Luna Specialist",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "report",
+                "display_name": "Specialist report",
+                "method": "analyze",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "GPT-5.6 Luna Specialist"
+        }
+      },
+      {
+        "id": "AnalystSpecialist-news",
+        "type": "genericNode",
+        "position": {
+          "x": 760,
+          "y": 840
+        },
+        "data": {
+          "id": "AnalystSpecialist-news",
+          "type": "AnalystSpecialist",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "payload": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "payload",
+                "value": "",
+                "display_name": "Evidence packs",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from lfx.custom.custom_component.component import Component\nfrom lfx.io import HandleInput, DropdownInput, Output\nfrom lfx.schema.data import Data\nimport sys\n\nclass AnalystSpecialist(Component):\n    display_name = 'GPT-5.6 Luna Specialist'\n    description = 'One distinct specialist role; blind to analyst-derived inputs. Responses API with validated evidence citations.'\n    icon = 'Brain'\n    name = 'AnalystSpecialist'\n    inputs = [HandleInput(name='payload',display_name='Evidence packs',input_types=['Data'],required=True),\n              DropdownInput(name='role',display_name='Specialist role',options=['fundamental','technical','news'],value='fundamental')]\n    outputs = [Output(name='report',display_name='Specialist report',method='analyze')]\n\n    def analyze(self) -> Data:\n        data=self.payload.data\n        if data['root'] not in sys.path:sys.path.insert(0,data['root'])\n        from analyst_portfolio.pipeline import specialist_stage\n        return Data(data=specialist_stage(data,self.role))\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "role": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "options": [
+                  "fundamental",
+                  "technical",
+                  "news"
+                ],
+                "options_metadata": [],
+                "combobox": false,
+                "dialog_inputs": {},
+                "toggle": false,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "role",
+                "value": "news",
+                "display_name": "Specialist role",
+                "advanced": false,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "external_options": {},
+                "type": "str",
+                "_input_type": "DropdownInput"
+              }
+            },
+            "description": "One distinct specialist role; blind to analyst-derived inputs. Responses API with validated evidence citations.",
+            "icon": "Brain",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "GPT-5.6 Luna Specialist",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "report",
+                "display_name": "Specialist report",
+                "method": "analyze",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "GPT-5.6 Luna Specialist"
+        }
+      },
+      {
+        "id": "AnalystManager-manager",
+        "type": "genericNode",
+        "position": {
+          "x": 1160,
+          "y": 400
+        },
+        "data": {
+          "id": "AnalystManager-manager",
+          "type": "AnalystManager",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "fundamental": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "fundamental",
+                "value": "",
+                "display_name": "Fundamental report",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "news": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "news",
+                "value": "",
+                "display_name": "News report",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "payload": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "payload",
+                "value": "",
+                "display_name": "Evidence packs",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "technical": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "technical",
+                "value": "",
+                "display_name": "Technical report",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from lfx.custom.custom_component.component import Component\nfrom lfx.io import HandleInput, Output\nfrom lfx.schema.data import Data\nimport sys\n\nclass AnalystManager(Component):\n    display_name = 'Independent + IBES Manager'\n    description = 'First make independent recommendations, then explain and confirm/upgrade/downgrade IBES consensus. Separate API calls prevent rating leakage.'\n    icon = 'Users'\n    name = 'AnalystManager'\n    inputs = [HandleInput(name=n,display_name=title,input_types=['Data'],required=True)\n              for n,title in [('payload','Evidence packs'),('fundamental','Fundamental report'),\n                              ('technical','Technical report'),('news','News report')]]\n    outputs = [Output(name='recommendations',display_name='Recommendations',method='recommend')]\n\n    def recommend(self) -> Data:\n        p=self.payload.data\n        if p['root'] not in sys.path:sys.path.insert(0,p['root'])\n        from analyst_portfolio.pipeline import manager_stage\n        reports={r:getattr(self,r).data['reports'] for r in ['fundamental','technical','news']}\n        return Data(data=manager_stage(p,reports))\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              }
+            },
+            "description": "First make independent recommendations, then explain and confirm/upgrade/downgrade IBES consensus. Separate API calls prevent rating leakage.",
+            "icon": "Users",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "Independent + IBES Manager",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "recommendations",
+                "display_name": "Recommendations",
+                "method": "recommend",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "Independent + IBES Manager"
+        }
+      },
+      {
+        "id": "MarkowitzPortfolio-portfolio",
+        "type": "genericNode",
+        "position": {
+          "x": 1570,
+          "y": 400
+        },
+        "data": {
+          "id": "MarkowitzPortfolio-portfolio",
+          "type": "MarkowitzPortfolio",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "recommendations": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "recommendations",
+                "value": "",
+                "display_name": "Recommendations",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from lfx.custom.custom_component.component import Component\nfrom lfx.io import HandleInput, Output\nfrom lfx.schema.data import Data\nimport sys\n\nclass MarkowitzPortfolio(Component):\n    display_name = 'Buy Calls → Markowitz'\n    description = 'Buy recommendations feed long-only capped mean-variance portfolios; also minimum-variance, maximum-Sharpe and equal-weight controls.'\n    icon = 'ChartPie'\n    name = 'MarkowitzPortfolio'\n    inputs = [HandleInput(name='recommendations',display_name='Recommendations',input_types=['Data'],required=True)]\n    outputs = [Output(name='portfolio',display_name='Portfolio and audit',method='construct')]\n\n    def construct(self) -> Data:\n        p=self.recommendations.data\n        if p['root'] not in sys.path:sys.path.insert(0,p['root'])\n        from analyst_portfolio.pipeline import portfolio_stage\n        return Data(data=portfolio_stage(p))\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              }
+            },
+            "description": "Buy recommendations feed long-only capped mean-variance portfolios; also minimum-variance, maximum-Sharpe and equal-weight controls.",
+            "icon": "ChartPie",
+            "base_classes": [
+              "JSON"
+            ],
+            "display_name": "Buy Calls → Markowitz",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "JSON"
+                ],
+                "selected": "JSON",
+                "name": "portfolio",
+                "display_name": "Portfolio and audit",
+                "method": "construct",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "Buy Calls → Markowitz"
+        }
+      },
+      {
+        "id": "ResearchOutput-research",
+        "type": "genericNode",
+        "position": {
+          "x": 1970,
+          "y": 400
+        },
+        "data": {
+          "id": "ResearchOutput-research",
+          "type": "ResearchOutput",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "portfolio": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "portfolio",
+                "value": "",
+                "display_name": "Portfolio and audit",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data"
+                ],
+                "dynamic": false,
+                "info": "",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from lfx.custom.custom_component.component import Component\nfrom lfx.io import HandleInput, Output\nfrom lfx.schema.message import Message\nimport json\nfrom pathlib import Path\n\nclass ResearchOutput(Component):\n    display_name = 'Research Output'\n    description = 'Show recommendation explanations, evidence, weights, frozen policy hash and saved output. CLI evaluates all seven dates.'\n    icon = 'FileText'\n    name = 'ResearchOutput'\n    inputs = [HandleInput(name='portfolio',display_name='Portfolio and audit',input_types=['Data'],required=True)]\n    outputs = [Output(name='message',display_name='Research results',method='render')]\n\n    def render(self) -> Message:\n        p=self.portfolio.data\n        root=Path(p['root'])\n        import pandas as pd\n        u=pd.read_parquet(json.loads((root/'config.json').read_text())['full_dir']+'/universe.parquet').set_index('gvkey')\n        lines=[f\"## {p['date']} · {p['role']} · GPT-5.6 Luna\",f\"Frozen calibration: `{p['freeze_sha256'][:16]}`\",\n               'Buy recommendations feed Markowitz. Research output; 21-session call horizon.',\n               '|Stock|Independent|IBES|With IBES|Action|','|---|---|---|---|---|']\n        for b,w,a in zip(p['blind'],p['with'],p['ibes']):\n            name=u.at[b['id'],'ticker_symbol']\n            lines.append(f\"|{name}|{b['rating_5']}|{a['label'] or 'unavailable'}|{w['rating_5']}|{w['action']}|\")\n        for name,obj in p['portfolios'].items():\n            lines.append(f\"\\n### {name} (cash {obj['cash']:.1%})\")\n            for k,v in sorted(obj['weights'].items(),key=lambda kv:-kv[1]):lines.append(f\"- {u.at[k,'ticker_symbol']}: {v:.2%}\")\n        lines.append('\\n### Explanations with analyst context')\n        for r in p['with']:\n            lines.append(f\"\\n**{u.at[r['id'],'ticker_symbol']} — {r['rating_5']}**: {r['rationale']}\\nEvidence: {', '.join(r['evidence_ids'])}\")\n        lines.append('\\nRun `analyst-portfolio evaluate` to compute all-date hit rates and OOS portfolio Sharpe.')\n        return Message(text='\\n'.join(lines))\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              }
+            },
+            "description": "Show recommendation explanations, evidence, weights, frozen policy hash and saved output. CLI evaluates all seven dates.",
+            "icon": "FileText",
+            "base_classes": [
+              "Message"
+            ],
+            "display_name": "Research Output",
+            "documentation": "",
+            "minimized": false,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "Message"
+                ],
+                "selected": "Message",
+                "name": "message",
+                "display_name": "Research results",
+                "method": "render",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "Research Output"
+        }
+      },
+      {
+        "id": "ChatOutput-output",
+        "type": "genericNode",
+        "position": {
+          "x": 2370,
+          "y": 400
+        },
+        "data": {
+          "id": "ChatOutput-output",
+          "type": "ChatOutput",
+          "node": {
+            "template": {
+              "_type": "Component",
+              "input_value": {
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": true,
+                "placeholder": "",
+                "show": true,
+                "name": "input_value",
+                "value": "",
+                "display_name": "Inputs",
+                "advanced": false,
+                "api_editable": false,
+                "input_types": [
+                  "Data",
+                  "JSON",
+                  "DataFrame",
+                  "Table",
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "Message to be passed as output.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "other",
+                "_input_type": "HandleInput"
+              },
+              "clean_data": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "clean_data",
+                "value": true,
+                "display_name": "Basic Clean Data",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "Whether to clean data before converting to string.",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "_input_type": "BoolInput"
+              },
+              "code": {
+                "type": "code",
+                "required": true,
+                "placeholder": "",
+                "list": false,
+                "show": true,
+                "multiline": true,
+                "value": "from collections.abc import Generator\nfrom typing import Any\n\nimport orjson\nfrom fastapi.encoders import jsonable_encoder\n\nfrom lfx.base.io.chat import ChatComponent\nfrom lfx.helpers.data import safe_convert\nfrom lfx.inputs.inputs import BoolInput, DropdownInput, HandleInput, MessageTextInput\nfrom lfx.schema.data import Data\nfrom lfx.schema.dataframe import DataFrame\nfrom lfx.schema.message import Message\nfrom lfx.schema.properties import Source\nfrom lfx.template.field.base import Output\nfrom lfx.utils.constants import (\n    MESSAGE_SENDER_AI,\n    MESSAGE_SENDER_NAME_AI,\n    MESSAGE_SENDER_USER,\n)\n\n\nclass ChatOutput(ChatComponent):\n    display_name = \"Chat Output\"\n    description = \"Display a chat message in the Playground.\"\n    documentation: str = \"https://docs.langflow.org/chat-input-and-output\"\n    icon = \"MessagesSquare\"\n    name = \"ChatOutput\"\n    minimized = True\n\n    inputs = [\n        HandleInput(\n            name=\"input_value\",\n            display_name=\"Inputs\",\n            info=\"Message to be passed as output.\",\n            input_types=[\"Data\", \"JSON\", \"DataFrame\", \"Table\", \"Message\"],\n            required=True,\n        ),\n        BoolInput(\n            name=\"should_store_message\",\n            display_name=\"Store Messages\",\n            info=\"Store the message in the history.\",\n            value=True,\n            advanced=True,\n        ),\n        DropdownInput(\n            name=\"sender\",\n            display_name=\"Sender Type\",\n            options=[MESSAGE_SENDER_AI, MESSAGE_SENDER_USER],\n            value=MESSAGE_SENDER_AI,\n            advanced=True,\n            info=\"Type of sender.\",\n        ),\n        MessageTextInput(\n            name=\"sender_name\",\n            display_name=\"Sender Name\",\n            info=\"Name of the sender.\",\n            value=MESSAGE_SENDER_NAME_AI,\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"session_id\",\n            display_name=\"Session ID\",\n            info=\"The session ID of the chat. If empty, the current session ID parameter will be used.\",\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"context_id\",\n            display_name=\"Context ID\",\n            info=\"The context ID of the chat. Adds an extra layer to the local memory.\",\n            value=\"\",\n            advanced=True,\n        ),\n        MessageTextInput(\n            name=\"data_template\",\n            display_name=\"Data Template\",\n            value=\"{text}\",\n            advanced=True,\n            info=\"Template to convert Data to Text. If left empty, it will be dynamically set to the Data's text key.\",\n        ),\n        BoolInput(\n            name=\"clean_data\",\n            display_name=\"Basic Clean Data\",\n            value=True,\n            advanced=True,\n            info=\"Whether to clean data before converting to string.\",\n        ),\n    ]\n    outputs = [\n        Output(\n            display_name=\"Output Message\",\n            name=\"message\",\n            method=\"message_response\",\n        ),\n    ]\n\n    def _build_source(self, id_: str | None, display_name: str | None, source: str | None) -> Source:\n        source_dict = {}\n        if id_:\n            source_dict[\"id\"] = id_\n        if display_name:\n            source_dict[\"display_name\"] = display_name\n        if source:\n            # Handle case where source is a ChatOpenAI object\n            if hasattr(source, \"model_name\"):\n                source_dict[\"source\"] = source.model_name\n            elif hasattr(source, \"model\"):\n                source_dict[\"source\"] = str(source.model)\n            else:\n                source_dict[\"source\"] = str(source)\n        return Source(**source_dict)\n\n    async def message_response(self) -> Message:\n        # First convert the input to string if needed\n        text = self.convert_to_string()\n\n        # Get source properties\n        source, _, display_name, source_id = self.get_properties_from_source_component()\n\n        # Create or use existing Message object\n        if isinstance(self.input_value, Message) and not self.is_connected_to_chat_input():\n            message = self.input_value\n            # Update message properties\n            message.text = text\n            # Preserve existing session_id from the incoming message if it exists\n            existing_session_id = message.session_id\n        else:\n            message = Message(text=text)\n            existing_session_id = None\n\n        # Set message properties\n        message.sender = self.sender\n        message.sender_name = self.sender_name\n        # Preserve session_id from incoming message, or use component/graph session_id\n        message.session_id = (\n            self.session_id or existing_session_id or (self.graph.session_id if hasattr(self, \"graph\") else None) or \"\"\n        )\n        message.context_id = self.context_id\n        message.flow_id = self.graph.flow_id if hasattr(self, \"graph\") else None\n        message.properties.source = self._build_source(source_id, display_name, source)\n\n        # Store message if needed\n        if message.session_id and self.should_store_message:\n            stored_message = await self.send_message(message)\n            self.message.value = stored_message\n            message = stored_message\n\n        # Set accumulated token usage from all upstream LLM vertices.\n        # This must happen AFTER send_message() because streaming captures\n        # usage from chunks and would overwrite accumulated totals.\n        if hasattr(self, \"_vertex\") and self._vertex is not None:\n            accumulated_usage = self._vertex._accumulate_upstream_token_usage()  # noqa: SLF001\n            if accumulated_usage:\n                message.properties.usage = accumulated_usage\n                if self.should_store_message and message.get_id():\n                    message = await self._update_stored_message(message)\n                    await self._send_message_event(message, id_=message.get_id())\n\n        self.status = message\n        return message\n\n    def _serialize_data(self, data: Data) -> str:\n        \"\"\"Serialize Data object to JSON string.\"\"\"\n        # Convert data.data to JSON-serializable format\n        serializable_data = jsonable_encoder(data.data)\n        # Serialize with orjson, enabling pretty printing with indentation\n        json_bytes = orjson.dumps(serializable_data, option=orjson.OPT_INDENT_2)\n        # Convert bytes to string and wrap in Markdown code blocks\n        return \"```json\\n\" + json_bytes.decode(\"utf-8\") + \"\\n```\"\n\n    def _validate_input(self) -> None:\n        \"\"\"Validate the input data and raise ValueError if invalid.\"\"\"\n        if self.input_value is None:\n            msg = \"Input data cannot be None\"\n            raise ValueError(msg)\n        if isinstance(self.input_value, list) and not all(\n            isinstance(item, Message | Data | DataFrame | str) for item in self.input_value\n        ):\n            invalid_types = [\n                type(item).__name__\n                for item in self.input_value\n                if not isinstance(item, Message | Data | DataFrame | str)\n            ]\n            msg = f\"Expected Data or DataFrame or Message or str, got {invalid_types}\"\n            raise TypeError(msg)\n        if not isinstance(\n            self.input_value,\n            Message | Data | DataFrame | str | list | Generator | type(None),\n        ):\n            type_name = type(self.input_value).__name__\n            msg = f\"Expected Data or DataFrame or Message or str, Generator or None, got {type_name}\"\n            raise TypeError(msg)\n\n    def convert_to_string(self) -> str | Generator[Any, None, None]:\n        \"\"\"Convert input data to string with proper error handling.\"\"\"\n        self._validate_input()\n        clean_data: bool = getattr(self, \"clean_data\", False)\n        if isinstance(self.input_value, list):\n            return \"\\n\".join([safe_convert(item, clean_data=clean_data) for item in self.input_value])\n        if isinstance(self.input_value, Generator):\n            return self.input_value\n        return safe_convert(self.input_value, clean_data=clean_data)\n",
+                "fileTypes": [],
+                "file_path": "",
+                "password": false,
+                "name": "code",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": true,
+                "info": "",
+                "load_from_db": false,
+                "title_case": false
+              },
+              "context_id": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "context_id",
+                "value": "",
+                "display_name": "Context ID",
+                "advanced": true,
+                "api_editable": false,
+                "input_types": [
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "The context ID of the chat. Adds an extra layer to the local memory.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "MessageTextInput"
+              },
+              "data_template": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "data_template",
+                "value": "{text}",
+                "display_name": "Data Template",
+                "advanced": true,
+                "api_editable": false,
+                "input_types": [
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "Template to convert Data to Text. If left empty, it will be dynamically set to the Data's text key.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "MessageTextInput"
+              },
+              "sender": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "options": [
+                  "Machine",
+                  "User"
+                ],
+                "options_metadata": [],
+                "combobox": false,
+                "dialog_inputs": {},
+                "toggle": false,
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "sender",
+                "value": "Machine",
+                "display_name": "Sender Type",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "Type of sender.",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "external_options": {},
+                "type": "str",
+                "_input_type": "DropdownInput"
+              },
+              "sender_name": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "sender_name",
+                "value": "AI",
+                "display_name": "Sender Name",
+                "advanced": true,
+                "api_editable": false,
+                "input_types": [
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "Name of the sender.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "MessageTextInput"
+              },
+              "session_id": {
+                "tool_mode": false,
+                "trace_as_input": true,
+                "trace_as_metadata": true,
+                "load_from_db": false,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "session_id",
+                "value": "",
+                "display_name": "Session ID",
+                "advanced": true,
+                "api_editable": false,
+                "input_types": [
+                  "Message"
+                ],
+                "dynamic": false,
+                "info": "The session ID of the chat. If empty, the current session ID parameter will be used.",
+                "title_case": false,
+                "track_in_telemetry": false,
+                "type": "str",
+                "_input_type": "MessageTextInput"
+              },
+              "should_store_message": {
+                "tool_mode": false,
+                "trace_as_metadata": true,
+                "list": false,
+                "list_add_label": "Add More",
+                "override_skip": false,
+                "required": false,
+                "placeholder": "",
+                "show": true,
+                "name": "should_store_message",
+                "value": false,
+                "display_name": "Store Messages",
+                "advanced": true,
+                "api_editable": false,
+                "dynamic": false,
+                "info": "Store the message in the history.",
+                "title_case": false,
+                "track_in_telemetry": true,
+                "type": "bool",
+                "_input_type": "BoolInput"
+              }
+            },
+            "description": "Display a chat message in the Playground.",
+            "icon": "MessagesSquare",
+            "base_classes": [
+              "Message"
+            ],
+            "display_name": "Chat Output",
+            "documentation": "https://docs.langflow.org/chat-input-and-output",
+            "minimized": true,
+            "custom_fields": {},
+            "output_types": [],
+            "pinned": false,
+            "conditional_paths": [],
+            "frozen": false,
+            "outputs": [
+              {
+                "types": [
+                  "Message"
+                ],
+                "selected": "Message",
+                "name": "message",
+                "display_name": "Output Message",
+                "method": "message_response",
+                "value": "__UNDEFINED__",
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": true
+              }
+            ],
+            "field_order": [],
+            "beta": false,
+            "legacy": false,
+            "edited": false,
+            "metadata": {},
+            "tool_mode": false
+          },
+          "display_name": "Chat Output"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "ChatInput-request",
+        "target": "PointInTimePack-packs",
+        "sourceHandle": "{œdataTypeœ:œChatInputœ,œidœ:œChatInput-requestœ,œnameœ:œmessageœ,œoutput_typesœ:[œMessageœ]}",
+        "targetHandle": "{œfieldNameœ:œrequestœ,œidœ:œPointInTimePack-packsœ,œinputTypesœ:[œMessageœ],œtypeœ:œstrœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "ChatInput",
+            "id": "ChatInput-request",
+            "name": "message",
+            "output_types": [
+              "Message"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "request",
+            "id": "PointInTimePack-packs",
+            "inputTypes": [
+              "Message"
+            ],
+            "type": "str"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "PointInTimePack-packs",
+        "target": "AnalystSpecialist-fundamental",
+        "sourceHandle": "{œdataTypeœ:œPointInTimePackœ,œidœ:œPointInTimePack-packsœ,œnameœ:œpayloadœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œpayloadœ,œidœ:œAnalystSpecialist-fundamentalœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "PointInTimePack",
+            "id": "PointInTimePack-packs",
+            "name": "payload",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "payload",
+            "id": "AnalystSpecialist-fundamental",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "PointInTimePack-packs",
+        "target": "AnalystSpecialist-technical",
+        "sourceHandle": "{œdataTypeœ:œPointInTimePackœ,œidœ:œPointInTimePack-packsœ,œnameœ:œpayloadœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œpayloadœ,œidœ:œAnalystSpecialist-technicalœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "PointInTimePack",
+            "id": "PointInTimePack-packs",
+            "name": "payload",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "payload",
+            "id": "AnalystSpecialist-technical",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "PointInTimePack-packs",
+        "target": "AnalystSpecialist-news",
+        "sourceHandle": "{œdataTypeœ:œPointInTimePackœ,œidœ:œPointInTimePack-packsœ,œnameœ:œpayloadœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œpayloadœ,œidœ:œAnalystSpecialist-newsœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "PointInTimePack",
+            "id": "PointInTimePack-packs",
+            "name": "payload",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "payload",
+            "id": "AnalystSpecialist-news",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-4",
+        "source": "PointInTimePack-packs",
+        "target": "AnalystManager-manager",
+        "sourceHandle": "{œdataTypeœ:œPointInTimePackœ,œidœ:œPointInTimePack-packsœ,œnameœ:œpayloadœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œpayloadœ,œidœ:œAnalystManager-managerœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "PointInTimePack",
+            "id": "PointInTimePack-packs",
+            "name": "payload",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "payload",
+            "id": "AnalystManager-manager",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-5",
+        "source": "AnalystSpecialist-fundamental",
+        "target": "AnalystManager-manager",
+        "sourceHandle": "{œdataTypeœ:œAnalystSpecialistœ,œidœ:œAnalystSpecialist-fundamentalœ,œnameœ:œreportœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œfundamentalœ,œidœ:œAnalystManager-managerœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "AnalystSpecialist",
+            "id": "AnalystSpecialist-fundamental",
+            "name": "report",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "fundamental",
+            "id": "AnalystManager-manager",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-6",
+        "source": "AnalystSpecialist-technical",
+        "target": "AnalystManager-manager",
+        "sourceHandle": "{œdataTypeœ:œAnalystSpecialistœ,œidœ:œAnalystSpecialist-technicalœ,œnameœ:œreportœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œtechnicalœ,œidœ:œAnalystManager-managerœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "AnalystSpecialist",
+            "id": "AnalystSpecialist-technical",
+            "name": "report",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "technical",
+            "id": "AnalystManager-manager",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-7",
+        "source": "AnalystSpecialist-news",
+        "target": "AnalystManager-manager",
+        "sourceHandle": "{œdataTypeœ:œAnalystSpecialistœ,œidœ:œAnalystSpecialist-newsœ,œnameœ:œreportœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œnewsœ,œidœ:œAnalystManager-managerœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "AnalystSpecialist",
+            "id": "AnalystSpecialist-news",
+            "name": "report",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "news",
+            "id": "AnalystManager-manager",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-8",
+        "source": "AnalystManager-manager",
+        "target": "MarkowitzPortfolio-portfolio",
+        "sourceHandle": "{œdataTypeœ:œAnalystManagerœ,œidœ:œAnalystManager-managerœ,œnameœ:œrecommendationsœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œrecommendationsœ,œidœ:œMarkowitzPortfolio-portfolioœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "AnalystManager",
+            "id": "AnalystManager-manager",
+            "name": "recommendations",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "recommendations",
+            "id": "MarkowitzPortfolio-portfolio",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-9",
+        "source": "MarkowitzPortfolio-portfolio",
+        "target": "ResearchOutput-research",
+        "sourceHandle": "{œdataTypeœ:œMarkowitzPortfolioœ,œidœ:œMarkowitzPortfolio-portfolioœ,œnameœ:œportfolioœ,œoutput_typesœ:[œDataœ]}",
+        "targetHandle": "{œfieldNameœ:œportfolioœ,œidœ:œResearchOutput-researchœ,œinputTypesœ:[œDataœ],œtypeœ:œotherœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "MarkowitzPortfolio",
+            "id": "MarkowitzPortfolio-portfolio",
+            "name": "portfolio",
+            "output_types": [
+              "Data"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "portfolio",
+            "id": "ResearchOutput-research",
+            "inputTypes": [
+              "Data"
+            ],
+            "type": "other"
+          }
+        },
+        "animated": false,
+        "className": ""
+      },
+      {
+        "id": "edge-10",
+        "source": "ResearchOutput-research",
+        "target": "ChatOutput-output",
+        "sourceHandle": "{œdataTypeœ:œResearchOutputœ,œidœ:œResearchOutput-researchœ,œnameœ:œmessageœ,œoutput_typesœ:[œMessageœ]}",
+        "targetHandle": "{œfieldNameœ:œinput_valueœ,œidœ:œChatOutput-outputœ,œinputTypesœ:[œMessageœ],œtypeœ:œstrœ}",
+        "data": {
+          "sourceHandle": {
+            "dataType": "ResearchOutput",
+            "id": "ResearchOutput-research",
+            "name": "message",
+            "output_types": [
+              "Message"
+            ]
+          },
+          "targetHandle": {
+            "fieldName": "input_value",
+            "id": "ChatOutput-output",
+            "inputTypes": [
+              "Message"
+            ],
+            "type": "str"
+          }
+        },
+        "animated": false,
+        "className": ""
+      }
+    ],
+    "viewport": {
+      "x": 30,
+      "y": 30,
+      "zoom": 0.45
+    }
+  },
+  "is_component": false,
+  "last_tested_version": "1.12.0",
+  "tags": [
+    "finance",
+    "multi-agent",
+    "point-in-time"
+  ],
+  "endpoint_name": "analyst-portfolio"
+}

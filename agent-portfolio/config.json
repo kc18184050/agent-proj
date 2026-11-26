@@ -1,0 +1,20 @@
+{
+  "open_dir": "../agent-data/20261110/open",
+  "full_dir": "../agent-data/20261110/full",
+  "cutoff": "2026-02-16",
+  "model": "gpt-5.6-luna",
+  "horizon_sessions": 21,
+  "news_window_days": 90,
+  "news_limit": 8,
+  "consensus_max_age": "12m",
+  "consensus_age_basis": "usable",
+  "min_brokers": 3,
+  "covariance_window": 252,
+  "risk_aversion": 5.0,
+  "max_weight": 0.1,
+  "transaction_cost_bps": 10,
+  "batch_size": 10,
+  "workers": 6,
+  "hold_band": 0.01,
+  "prompt_version": "1.0.0"
+}
